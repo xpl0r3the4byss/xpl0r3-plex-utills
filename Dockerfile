@@ -28,6 +28,8 @@ RUN apt-get update && apt-get upgrade -y \
         ffmpeg \
         libsm6 \
         libxext6 \
+        libgl1-mesa-glx \
+        python3-opencv \
         nano \
     && rm -rf /var/lib/apt/lists/*
 
