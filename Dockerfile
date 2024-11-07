@@ -1,7 +1,11 @@
 # Build stage
-FROM python:3.12-slim-bookworm as builder
+FROM python:3.12-slim-bookworm AS builder
 
 WORKDIR /app
+
+# Install git for pip requirements
+RUN apt-get update && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip \
@@ -19,7 +23,6 @@ LABEL maintainer="xpl0r3the4byss" \
 RUN apt-get update && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends \
         wget \
-        git \
         mediainfo \
         nginx \
         ffmpeg \
