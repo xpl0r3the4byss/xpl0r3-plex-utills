@@ -408,6 +408,13 @@ def get_episodes(var=''):
     posters = scripts.get_tmdb_episode_posters(var)
     return render_template('/season.html', pagetitle='Shows', version=version, show=pagination_films, page=page, per_page=per_page, pagination=pagination, posters=posters)
 
+# Add this before the search route
+class Film:
+    def __init__(self, title, guid, thumb_url, poster):
+        self.title = title
+        self.guid = guid
+        self.thumb_url = thumb_url
+        self.poster = poster
 
 @app.route('/search', methods=['GET', 'POST'])
 def search():
@@ -458,3 +465,4 @@ def paginate_items(items, page_args, per_page=48):
     return (items[offset: offset + per_page],
             Pagination(page=page, per_page=per_page, 
                       total=len(items), css_framework='bootstrap5'))
+
