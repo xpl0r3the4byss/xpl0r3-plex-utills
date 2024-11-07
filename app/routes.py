@@ -12,6 +12,7 @@ from threading import Thread
 import datetime
 from app import scripts
 from plexapi.server import PlexServer
+from flask import current_app
 
 date = datetime.datetime.now()
 date = date.strftime("%y.%m.%d-%H%M")
@@ -31,13 +32,15 @@ def get_version():
 
 version = get_version()
 
+# Add a flag to track initialization
+_initialization_done = False
+
 @app.before_request
 def update_plex_path():
-    import requests
-    import re
-    from plexapi.server import PlexServer
+    global _initialization_done
     
-    if request.path.startswith('/static/'):
+    # Skip for static files and if already initialized
+    if request.path.startswith('/static/') or _initialization_done:
         return
 
     try:
@@ -59,22 +62,25 @@ def update_plex_path():
                     pass
             else:
                 films = plex.library.section(config[0][3])
+                
             media_location = films.search(limit='1')
             if config[0][37] == 1:
                 plexpath = config[0][38]
-                c.execute("UPDATE plex_utills SET plexpath = ? WHERE ID = 1", (plexpath,))
-                conn.commit()
-                c.close()
-            elif config[0][37] == 0:
+            else:
                 filepath = os.path.dirname(os.path.dirname(media_location[0].media[0].parts[0].file))
                 try:
                     plexpath = '/'+filepath.split('/')[2]
                     plexpath = '/'+filepath.split('/')[1]
-                except IndexError as e:
+                except IndexError:
                     plexpath = '/'
-                c.execute("UPDATE plex_utills SET plexpath = ? WHERE ID = 1", (plexpath,))
-                conn.commit()
-                c.close()
+                    
+            c.execute("UPDATE plex_utills SET plexpath = ? WHERE ID = 1", (plexpath,))
+            conn.commit()
+            
+            # Mark initialization as complete
+            global _initialization_done
+            _initialization_done = True
+            
     except Exception as e:
         log.error(f"Error in update_plex_path: {e}")
         return
