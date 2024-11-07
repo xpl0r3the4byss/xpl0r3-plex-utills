@@ -8,3 +8,4 @@ redis>=5.0.1
 celery>=5.3.6
 SQLAlchemy>=2.0.23
 psycopg2-binary>=2.9.9
+flask-sqlalchemy>=3.0.0

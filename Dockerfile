@@ -57,6 +57,8 @@ RUN echo "add_header X-Frame-Options SAMEORIGIN;" >> /etc/nginx/conf.d/security.
     && echo "add_header X-XSS-Protection \"1; mode=block\";" >> /etc/nginx/conf.d/security.conf \
     && echo "add_header Content-Security-Policy \"default-src 'self';\";" >> /etc/nginx/conf.d/security.conf
 
+RUN pip install flask-sqlalchemy
+
 EXPOSE 80 5000
 
 VOLUME [ "/films", "/config", "/logs" ]
