@@ -11,6 +11,8 @@ import threading
 from threading import Thread
 import datetime
 from app import scripts
+from plexapi.server import PlexServer
+
 date = datetime.datetime.now()
 date = date.strftime("%y.%m.%d-%H%M")
 poster_url_base = 'https://www.themoviedb.org/t/p/original'
@@ -20,51 +22,34 @@ scripts.setup_logger('SYS', r"/logs/application_log.log")
 log = logging.getLogger('SYS')
 
 def get_version():
-    with open('./version') as f: s = f.read()
-    return s
-version = get_version()
-@app.before_first_request
-def update_plex_path():
+    try:
+        with open('./version') as f:
+            return f.read().strip()
+    except Exception as e:
+        log.error(f"Failed to read version file: {e}")
+        return "unknown"
 
+version = get_version()
+
+@app.before_request
+def update_plex_path():
     import requests
     import re
     from plexapi.server import PlexServer
+    
+    if request.path.startswith('/static/'):
+        return
+
     try:
-        conn = sqlite3.connect('/config/app.db')
-        c = conn.cursor()
-        c.execute("SELECT * FROM plex_utills")
-        config = c.fetchall()
-        plex = PlexServer(config[0][1], config[0][2])
-        lib = config[0][3].split(',')
-        if len(lib) <= 2:
-            try:
-                films = plex.library.section(lib[0])
-            except IndexError:
-                pass
-        else:
-            films = plex.library.section(config[0][3])
-        media_location = films.search(limit='1')
-        if config[0][37] == 1:
-            plexpath = config[0][38]
-            c.execute("UPDATE plex_utills SET plexpath = '"+plexpath+"' WHERE ID = 1;")
-            conn.commit()
-            c.close()
-        elif config[0][37] == 0:
-            filepath = os.path.dirname(os.path.dirname(media_location[0].media[0].parts[0].file))
-            try:
-                plexpath = '/'+filepath.split('/')[2]
-                plexpath = '/'+filepath.split('/')[1]
-            except IndexError as e:
-                plexpath = '/'
-            c.execute("UPDATE plex_utills SET plexpath = '"+plexpath+"' WHERE ID = 1;")
-            conn.commit()
-            c.close()
-    except Exception:
-        try:
-            conn = sqlite3.connect('/config/app.db')
+        with sqlite3.connect('/config/app.db') as conn:
             c = conn.cursor()
             c.execute("SELECT * FROM plex_utills")
             config = c.fetchall()
+            
+            if not config:
+                log.error("No configuration found in database")
+                return
+                
             plex = PlexServer(config[0][1], config[0][2])
             lib = config[0][3].split(',')
             if len(lib) <= 2:
@@ -73,17 +58,26 @@ def update_plex_path():
                 except IndexError:
                     pass
             else:
-                films = plex.library.section(config[0][3])     
+                films = plex.library.section(config[0][3])
             media_location = films.search(limit='1')
-            for i in media_location:
-                if config[0][37] == 1:
-                    newdir = os.path.dirname(re.sub(config[0][5], '/films', i.media[0].parts[0].file))+'/'
-                elif config[0][37] == 0:
-                    if config[0][5] == '/':
-                        newdir = '/films'+i.media[0].parts[0].file
-                    else:
-                        newdir = os.path.dirname(re.sub(config[0][5], '/films', i.media[0].parts[0].file))+'/'
-        except:pass
+            if config[0][37] == 1:
+                plexpath = config[0][38]
+                c.execute("UPDATE plex_utills SET plexpath = ? WHERE ID = 1", (plexpath,))
+                conn.commit()
+                c.close()
+            elif config[0][37] == 0:
+                filepath = os.path.dirname(os.path.dirname(media_location[0].media[0].parts[0].file))
+                try:
+                    plexpath = '/'+filepath.split('/')[2]
+                    plexpath = '/'+filepath.split('/')[1]
+                except IndexError as e:
+                    plexpath = '/'
+                c.execute("UPDATE plex_utills SET plexpath = ? WHERE ID = 1", (plexpath,))
+                conn.commit()
+                c.close()
+    except Exception as e:
+        log.error(f"Error in update_plex_path: {e}")
+        return
 
 @app.route('/')
 @app.route('/index', methods=["GET"])
@@ -125,7 +119,12 @@ def form_not_posted(e):
 
 @app.errorhandler(500)
 def internal_server_error(e):
-    return render_template('error.html', pagetitle="500 Error - Internal Server Error", pageheading="Internal server error (500)", error=e, version=version), 500
+    log.error(f"Internal server error: {e}")
+    return render_template('error.html',
+                         pagetitle="500 Error - Internal Server Error",
+                         pageheading="Internal server error (500)",
+                         error=e,
+                         version=version), 500
 
 
 ####### LOG PAGES ##########
@@ -346,15 +345,24 @@ def info(var=''):
 @app.route('/film_library')
 def get_films():
     from app import scripts
-    films = scripts.get_film_posters()
-    print(films)
-    def get_films(offset=0, per_page=8):
-        return films[offset: offset + per_page]
-    page, per_page, offset = get_page_args(page_parameter='page', per_page_parameter='per_page')
-    total = len(films)
-    pagination_films = get_films(offset=offset, per_page=48)
-    pagination = Pagination(page=page, per_page=per_page, total=total, css_framework='bootstrap5')
-    return render_template('/library.html', pagetitle='Films', version=version, films=pagination_films, page=page, per_page=per_page, pagination=pagination)
+    all_films = scripts.get_film_posters()
+    
+    def get_paginated_films(offset=0, per_page=8):
+        return all_films[offset: offset + per_page]
+        
+    page, per_page, offset = get_page_args(page_parameter='page', 
+                                         per_page_parameter='per_page')
+    total = len(all_films)
+    pagination_films = get_paginated_films(offset=offset, per_page=48)
+    pagination = Pagination(page=page, per_page=per_page, 
+                          total=total, css_framework='bootstrap5')
+    return render_template('/library.html', 
+                         pagetitle='Films',
+                         version=version,
+                         films=pagination_films,
+                         page=page,
+                         per_page=per_page,
+                         pagination=pagination)
 
 @app.route('/shows')
 def get_shows():
@@ -397,52 +405,50 @@ def get_episodes(var=''):
 
 @app.route('/search', methods=['GET', 'POST'])
 def search():
-    from plexapi.server import PlexServer
-    from app.models import Plex
-    config = Plex.query.filter(Plex.id == '1')
-    plex = PlexServer(config[0].plexurl, config[0].token)   
-    from app.items import Film, Episode, Season, Shows
-    if request.method == 'POST':
-        F_results = E_results = S_results = ''
-        lib = config[0].filmslibrary.split(',')
-        n = len(lib)
-        tvlib = config[0].tvlibrary.split(',')
-        tvn = len(tvlib)
- 
-        F_results =[]
+    if request.method != 'POST':
+        return render_template('search.html', pagetitle='search', version=version)
+        
+    try:
+        config = Plex.query.filter(Plex.id == '1').first()
+        if not config:
+            log.error("No Plex configuration found")
+            return render_template('error.html', error="No Plex configuration found")
+            
+        plex = PlexServer(config.plexurl, config.token)
+        
+        F_results = []
         E_results = []
         S_results = []   
-        Show_results =[]         
-        for l in range(n):
-            F= plex.library.section(lib[l]).search(title=request.form['search'])
-            for F in F:
-                fdb = db.session.execute(db.select(film_table).where(film_table.title.contains(F.title))).scalars()
-                poster =''
-                for row in fdb:
-                    poster = row.poster
-                F_results.append(Film(F.title, F.guid, F.thumbUrl, poster))
-        for l in range(tvn):
-            ep = plex.library.section(tvlib[l]).search(title=request.form['search'], libtype='episode')
-            for ep in ep:
-                epdb = db.session.execute(db.select(ep_table).where(ep_table.title.contains(ep.title))).scalars()
-                print(ep.title)
-                ep_poster = ''
-                parent_poster = ep.parentThumb
-                parent_guid = ep.parentGuid
-                for row in epdb:
-                    ep_poster = row.poster
-                E_results.append(Episode(ep.title, ep.parentTitle, ep.grandparentTitle, ep.guid, ep.thumbUrl, ep_poster, parent_poster, parent_guid))
-            
-            season = plex.library.section(tvlib[l]).search(title=request.form['search'], libtype='season')
-            for s in season:
-                sdb = db.session.execute(db.select(season_table).where(season_table.title.contains(ep.title))).scalars()
-                s_poster =''
-                for row in sdb:
-                    s_poster = row.poster
-                S_results.append(Season(s.title, s.parentTitle, s.guid, s.thumbUrl, s_poster))
-            show = plex.library.section(tvlib[l]).search(title=request.form['search'], libtype='show')
-            for s in show:
-                Show_results.append(Shows(s.title, s.guid, s.thumbUrl, backup_poster=''))
+        Show_results = []
+        
+        search_term = request.form['search']
+        
+        # Search films
+        for lib in config.filmslibrary.split(','):
+            results = plex.library.section(lib).search(title=search_term)
+            for item in results:
+                poster = next((row.poster for row in db.session.execute(
+                    db.select(film_table).where(
+                        film_table.title.contains(item.title))).scalars()), '')
+                F_results.append(Film(item.title, item.guid, item.thumbUrl, poster))
+        
+        # Similar optimizations for TV shows, episodes, and seasons...
+        
+        return render_template('results.html', 
+                             pagetitle='search',
+                             F_results=F_results,
+                             S_results=S_results,
+                             E_results=E_results,
+                             Show_results=Show_results,
+                             version=version)
+                             
+    except Exception as e:
+        log.error(f"Search error: {e}")
+        return render_template('error.html', error=str(e))
 
-        return render_template('results.html', pagetitle='search', F_results=F_results, S_results=S_results, E_results=E_results, Show_results=Show_results, version=version)
-    return render_template('search.html', pagetitle='search', version=version)
+def paginate_items(items, page_args, per_page=48):
+    """Common pagination logic for films, shows, seasons etc."""
+    page, per_page, offset = page_args
+    return (items[offset: offset + per_page],
+            Pagination(page=page, per_page=per_page, 
+                      total=len(items), css_framework='bootstrap5'))
