@@ -59,6 +59,8 @@ RUN echo "add_header X-Frame-Options SAMEORIGIN;" >> /etc/nginx/conf.d/security.
 
 RUN pip install flask-sqlalchemy
 
+RUN pip install bootstrap-flask
+
 EXPOSE 80 5000
 
 VOLUME [ "/films", "/config", "/logs" ]
